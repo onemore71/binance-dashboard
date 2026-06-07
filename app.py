@@ -3,108 +3,127 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 
-st.set_page_config(layout="wide", page_title="Binance Futures Realtime Dashboard")
-st.title("🔥 바이낸스 USDT 무기한 선물(Perpetual) 대시보드")
+st.set_page_config(layout="wide", page_title="Altcoin Scanner")
+st.title("🚀 급등 주도 알트코인 실시간 스캐너")
+st.caption("메이저 제외 / 거래대금 동반 / 고변동성 알트코인 발굴 대시보드")
 
-@st.cache_data(ttl=15)
-def get_binance_futures_ticker():
-    # 기본 도메인이 막힐 경우를 대비해 바이낸스의 공식 대체 도메인(fapi1, fapi2 등)을 시도해볼 수 있습니다.
-    # 우선 가장 안정적인 기본 메인넷 주소를 사용하되, 예외 처리를 강화합니다.
-    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+@st.cache_data(ttl=30)  # 30초마다 갱신
+def get_coingecko_market_data():
+    # 시가총액 상위 300개 코인을 긁어와 알트코인 풀을 넓힙니다.
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 300,
+        "page": 1,
+        "sparkline": "true",
+        "price_change_percentage": "24h"
     }
     
-    res_raw = requests.get(url, headers=headers)
-    
-    # HTTP 상태 코드가 200(정상)이 아닐 때 에러 발생시키기
-    if res_raw.status_code != 200:
-        raise Exception(f"바이낸스 서버 응답 에러 (Status Code: {res_raw.status_code}) - {res_raw.text}")
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        raise Exception(f"코인게코 API 로드 실패 (Status: {response.status_code})")
         
-    response = res_raw.json()
+    data = response.json()
     
-    # 만약 response가 리스트 형식이 아니라 딕셔너리(에러 메시지)라면 예외 처리
-    if isinstance(response, dict) and "msg" in response:
-        raise Exception(f"바이낸스 API 에러: {response.get('msg')} (코드: {response.get('code')})")
-    
-    futures_data = []
-    for ticker in response:
-        # 안전하게 데이터가 딕셔너리인지 한 번 더 확인
-        if not isinstance(ticker, dict):
+    crypto_data = []
+    for coin in data:
+        symbol = coin['symbol'].upper()
+        name = coin['name']
+        
+        # 데이터 정제 및 예외 처리
+        price_change = coin.get('price_change_percentage_24h')
+        volume = coin.get('total_volume')
+        
+        if price_change is None or volume is None or volume == 0:
             continue
             
-        symbol = ticker.get('symbol', '')
+        crypto_data.append({
+            '심볼': f"{symbol}USDT",
+            '이름': name,
+            '현재가($)': float(coin.get('current_price', 0)),
+            '24h 변동률(%)': float(price_change),
+            '24h 거래대금(USD)': float(volume),
+            'sparkline': coin.get('sparkline_in_7d', {}).get('price', [])
+        })
         
-        # 1. USDT 마켓만 필터링
-        # 2. 분기별 선물 제외하고 오직 무기한(Perpetual)만 걸러내기
-        if symbol.endswith('USDT') and ('_' not in symbol):
-            
-            # 간혹 거래대금이 없는 신규/테스트 쌍 제외
-            if float(ticker.get('quoteVolume', 0)) == 0:
-                continue
-                
-            futures_data.append({
-                '심볼': symbol,
-                '현재가': float(ticker.get('lastPrice', 0)),
-                '24h 변동률(%)': float(ticker.get('priceChangePercent', 0)),
-                '거래량': float(ticker.get('volume', 0)),
-                '거래대금(USDT)': float(ticker.get('quoteVolume', 0))
-            })
-            
-    df = pd.DataFrame(futures_data)
-    return df
-
-def get_binance_futures_klines(symbol, interval='1h', limit=24):
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    res_raw = requests.get(url, headers=headers)
-    if res_raw.status_code == 200:
-        res = res_raw.json()
-        if isinstance(res, list):
-            closes = [float(candle[4]) for candle in res]
-            return closes
-    return []
+    return pd.DataFrame(crypto_data)
 
 try:
-    df = get_binance_futures_ticker()
+    df = get_coingecko_market_data()
 except Exception as e:
     st.error(f"❌ 데이터 로드 실패: {e}")
-    st.info("💡 팁: Streamlit Cloud 공용 서버의 IP가 바이낸스로부터 일시적으로 차단되었을 수 있습니다. 잠시 후 다시 시도하거나 주소를 변경해야 할 수 있습니다.")
     df = pd.DataFrame()
 
-# 사이드바 설정
-st.sidebar.header("⚙️ 정렬 및 필터 설정")
-sort_by = st.sidebar.selectbox("정렬 기준을 선택하세요", ["24h 변동률(%)", "거래대금(USDT)", "거래량"])
+# ⚙️ 사이드바 필터 및 정렬 설정
+st.sidebar.header("🔍 알트코인 필터링 조건")
+
+# 1. 메이저 코인 및 스테이블 코인 제외 토글
+exclude_majors = st.sidebar.checkbox("메이저 & 스테이블 코인 제외", value=True, 
+                                    help="BTC, ETH 및 주요 스테이블코인(USDT, USDC, DAI 등)을 리스트에서 숨깁니다.")
+
+# 2. 최소 거래대금 필터 (단위: 백만 달러)
+# 10M = 천만 달러 (약 130억 원), 50M = 5천만 달러
+min_volume_million = st.sidebar.slider(
+    "최소 24시간 거래대금 (백만 달러)", 
+    min_value=0, max_value=500, value=20, step=10,
+    help="돈이 몰리지 않은 거래량 전무한 코인을 필터링합니다."
+)
+
+st.sidebar.separator()
+
+# 3. 정렬 기준 설정 (기본값을 24h 변동률로 설정하여 급등주 우선 배치)
+sort_by = st.sidebar.selectbox("정렬 기준", ["24h 변동률(%)", "24h 거래대금(USD)"], index=0)
 order = st.sidebar.radio("정렬 순서", ["내림차순 (높은 순)", "오름차순 (낮은 순)"])
 ascending = True if order == "오름차순 (낮은 순)" else False
 
+
 if not df.empty:
-    df_sorted = df.sort_values(by=sort_by, ascending=ascending).head(10).reset_index(drop=True)
-    st.subheader(f"⚡ 퓨처스(Perpetual) {sort_by} {order} 상위 10개 자산")
+    processed_df = df.copy()
     
-    col1, col2 = st.columns([3, 2])
-    with col1:
-        st.dataframe(
-            df_sorted.style.format({
-                '현재가': '{:,.4f}',
-                '24h 변동률(%)': '{:+.2f}%',
-                '거래량': '{:,.0f}',
-                '거래대금(USDT)': '${:,.0f}'
-            }),
-            use_container_width=True, height=450
-        )
+    # [필터링 1] 메이저 및 스테이블 코인 제외 로직
+    if exclude_majors:
+        majors_and_stables = [
+            'BTCUSDT', 'ETHUSDT', 'USDTUSDT', 'USDCUSDT', 
+            'DAIUSDT', 'FDUSDUSDT', 'STETHUSDT', 'WETHUSDT', 'WBTCUSDT'
+        ]
+        processed_df = processed_df[~processed_df['심볼'].isin(majors_and_stables)]
+        # 이름 기반으로 랩핑된 자산이나 스테이블 추가 차단
+        processed_df = processed_df[~processed_df['이름'].str.contains('USD|Wrapped|Tether', case=False)]
+
+    # [필터링 2] 최소 거래대금 적용 (설정한 백만 달러 단위 거르기)
+    min_volume_bytes = min_volume_million * 1_000_000
+    processed_df = processed_df[processed_df['24h 거래대금(USD)'] >= min_volume_bytes]
+
+    # [정렬 및 상위 15개 추출]
+    df_sorted = processed_df.sort_values(by=sort_by, ascending=ascending).head(15).reset_index(drop=True)
+    
+    st.subheader(f"🔥 조건 만족 주도 알트코인 TOP 15 ({sort_by} 높은 순)")
+    
+    if not df_sorted.empty:
+        col1, col2 = st.columns([13, 9])
         
-    with col2:
-        st.markdown("### 📈 선택한 선물 자산 24시간 흐름 (1시간 봉)")
-        selected_symbol = st.selectbox("간략 차트를 볼 심볼 선택", df_sorted['심볼'].tolist())
-        
-        if selected_symbol:
-            try:
-                prices = get_binance_futures_klines(selected_symbol)
-                if prices:
+        with col1:
+            # 유저 화면에 노출할 데이터프레임 포맷팅 (차트 데이터 제외)
+            display_df = df_sorted.drop(columns=['sparkline'])
+            st.dataframe(
+                display_df.style.format({
+                    '현재가($)': '{:,.4f}',
+                    '24h 변동률(%)': '{:+.2f}%',
+                    '24h 거래대금(USD)': '${:,.0f}'
+                }),
+                use_container_width=True, height=520
+            )
+            
+        with col2:
+            st.markdown("### 📈 주도 알트코인 실시간 트렌드 (7일)")
+            selected_symbol = st.selectbox("상세 차트를 볼 알트코인 선택", df_sorted['심볼'].tolist())
+            
+            if selected_symbol:
+                selected_row = df_sorted[df_sorted['심볼'] == selected_symbol].iloc[0]
+                prices = selected_row['sparkline']
+                
+                if prices and len(prices) > 1:
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(
                         y=prices, mode='lines', 
@@ -115,13 +134,16 @@ if not df.empty:
                     fig.update_layout(
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=True, zeroline=False, showticklabels=True),
-                        margin=dict(l=20, r=20, t=10, b=10), height=300,
+                        margin=dict(l=25, r=25, t=10, b=10), height=320,
                         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 실시간 초간단 트레이딩 팁 메타데이터 출력
+                    st.metric(label="현재 가격", value=f"${selected_row['현재가($)']:,.4f}", delta=f"{selected_row['24h 변동률(%)']:+.2f}%")
                 else:
-                    st.warning("차트 데이터를 비어있습니다.")
-            except Exception as e:
-                st.warning("차트 데이터를 불러오지 못했습니다.")
+                    st.warning("차트 데이터를 불러오지 못했습니다.")
+    else:
+        st.warning("⚠️ 필터 조건을 만족하는 알트코인이 없습니다. '최소 거래대금' 슬라이더를 낮춰보세요.")
 else:
-    st.info("표시할 데이터가 없습니다. 위의 에러 메시지를 확인하세요.")
+    st.info("표시할 데이터가 없습니다.")
