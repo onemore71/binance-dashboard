@@ -10,8 +10,10 @@ st.title("📊 바이낸스 실시간 시장 대시보드")
 # 1. 바이낸스 24시간 Ticker 데이터 가져오기 (USDT 마켓 기준)
 @st.cache_data(ttl=10)  # 10초마다 데이터 캐싱 갱신
 def get_binance_ticker():
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+    # 기존 주소(api.binance.com) 대신 api3 또는 api1, api2 사용
+    url = "https://api3.binance.com/api/v3/ticker/24hr"
     response = requests.get(url).json()
+    # ... 이하 기존 코드 동일
     
     # USDT 마켓만 필터링
     usdt_data = [ticker for ticker in response if ticker['symbol'].endswith('USDT')]
@@ -30,8 +32,10 @@ def get_binance_ticker():
 
 # 2. 특정 심볼의 최근 캔들 데이터 가져오기 (간략 차트용)
 def get_klines(symbol, interval='1h', limit=24):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    # 여기도 마찬가지로 api3로 변경
+    url = f"https://api3.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     res = requests.get(url).json()
+    # ... 이하 기존 코드 동일
     # 종가(Close Price)만 추출
     closes = [float(candle[4]) for candle in res]
     return closes
