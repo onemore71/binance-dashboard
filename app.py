@@ -3,13 +3,13 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 
-st.set_page_config(layout="wide", page_title="Binance Global Realtime Dashboard")
-st.title("📊 바이낸스 본진(Global) 실시간 시장 대시보드")
+st.set_page_config(layout="wide", page_title="Binance Futures Realtime Dashboard")
+st.title("🔥 바이낸스 USDT 무기한 선물(Perpetual) 대시보드")
 
 @st.cache_data(ttl=15)
-def get_global_binance_ticker():
-    # [국가 제한 우회 핵심] 미국 IP를 차단하지 않는 글로벌 바이낸스 공용 데이터 미러 서버(공식 우회 채널) 활용
-    url = "https://data-api.binance.vision/api/v3/ticker/24hr"
+def get_binance_futures_ticker():
+    # [선물 마켓 핵심 주소] 무기한 선물용 fapi 도메인 및 24hr ticker 엔드포인트 사용
+    url = "https://fapi.binance.vision/fapi/v1/ticker/24hr"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -17,27 +17,32 @@ def get_global_binance_ticker():
     
     response = requests.get(url, headers=headers).json()
     
-    usdt_data = []
+    futures_data = []
     for ticker in response:
         symbol = ticker['symbol']
-        if symbol.endswith('USDT'):
-            if 'UP' in symbol or 'DOWN' in symbol or 'BEAR' in symbol or 'BULL' in symbol:
+        
+        # 1. USDT 마켓만 필터링 (BTCUSDT, ETHUSDT 등)
+        # 2. 분기별 선물(예: _260626 등 숫자가 들어간 기한부 선물)을 제외하고 오직 무기한(Perpetual)만 걸러내기
+        if symbol.endswith('USDT') and ('_' not in symbol):
+            
+            # 간혹 거래대금이 없는 신규/테스트 쌍 제외
+            if float(ticker['quoteVolume']) == 0:
                 continue
                 
-            usdt_data.append({
+            futures_data.append({
                 '심볼': symbol,
                 '현재가': float(ticker['lastPrice']),
                 '24h 변동률(%)': float(ticker['priceChangePercent']),
                 '거래량': float(ticker['volume']),
-                '거래대금(USDT)': float(ticker['quoteVolume'])
+                '거래대금(USDT)': float(ticker['quoteVolume']) # 선물 마켓의 24시간 누적 거래대금
             })
             
-    df = pd.DataFrame(usdt_data)
+    df = pd.DataFrame(futures_data)
     return df
 
-def get_global_klines(symbol, interval='1h', limit=24):
-    # 차트 데이터도 국가 제한이 없는 미러 서버 채널로 호출
-    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+def get_binance_futures_klines(symbol, interval='1h', limit=24):
+    # 차트 데이터도 선물 전용 캔들(fapi) 엔드포인트로 호출
+    url = f"https://fapi.binance.vision/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
@@ -46,9 +51,9 @@ def get_global_klines(symbol, interval='1h', limit=24):
     return closes
 
 try:
-    df = get_global_binance_ticker()
+    df = get_binance_futures_ticker()
 except Exception as e:
-    st.error(f"데이터 로드 실패: {e}")
+    st.error(f"선물 데이터 로드 실패: {e}")
     df = pd.DataFrame()
 
 # 사이드바 설정
@@ -59,7 +64,7 @@ ascending = True if order == "오름차순 (낮은 순)" else False
 
 if not df.empty:
     df_sorted = df.sort_values(by=sort_by, ascending=ascending).head(10).reset_index(drop=True)
-    st.subheader(f"🔥 글로벌 본진 {sort_by} {order} 상위 10개 자산")
+    st.subheader(f"⚡ 퓨처스(Perpetual) {sort_by} {order} 상위 10개 자산")
     
     col1, col2 = st.columns([3, 2])
     with col1:
@@ -74,12 +79,12 @@ if not df.empty:
         )
         
     with col2:
-        st.markdown("### 📈 선택한 자산 24시간 흐름 (1시간 봉)")
+        st.markdown("### 📈 선택한 선물 자산 24시간 흐름 (1시간 봉)")
         selected_symbol = st.selectbox("간략 차트를 볼 심볼 선택", df_sorted['심볼'].tolist())
         
         if selected_symbol:
             try:
-                prices = get_global_klines(selected_symbol)
+                prices = get_binance_futures_klines(selected_symbol)
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     y=prices, mode='lines', 
