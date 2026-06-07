@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.graph_objects as go
+import time
 
 st.set_page_config(layout="wide", page_title="Altcoin Scanner")
 st.title("🚀 급등 주도 알트코인 실시간 스캐너")
-st.caption("메이저 제외 / 거래대금 동반 / 코인게코 IP 규제 프리 데이터 연동")
+st.caption("메이저 제외 / 거래대금 동반 / 코인게코 프리 데이터 / 자동 새로고침 지원")
 
-@st.cache_data(ttl=30)  # 30초마다 데이터 갱신
+@st.cache_data(ttl=10)  # 자동 갱신 주기에 맞춰 캐시 ttl을 10초로 줄입니다.
 def get_coingecko_market_data():
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
@@ -15,7 +16,7 @@ def get_coingecko_market_data():
         "order": "market_cap_desc",
         "per_page": 250, 
         "page": 1,
-        "sparkline": "true",  # 7일간의 트렌드 선 차트 데이터를 포함하여 수집
+        "sparkline": "true",
         "price_change_percentage": "24h"
     }
     
@@ -65,20 +66,20 @@ sort_by = st.sidebar.selectbox("정렬 기준", ["24h 변동률(%)", "24h 거래
 order = st.sidebar.radio("정렬 순서", ["내림차순 (높은 순)", "오름차순 (낮은 순)"])
 ascending = True if order == "오름차순 (낮은 순)" else False
 
+st.sidebar.markdown("---")
+# 🕒 [신규 기능] 자동 새로고침 타이머 설정
+refresh_rate = st.sidebar.selectbox("🔄 자동 새로고침 주기", ["끄기", "30초", "1분", "2분"], index=2)
+
 
 if not df.empty:
     processed_df = df.copy()
     
-    # [필터링 1] 메이저 및 스테이블 코인 제외
     if exclude_majors:
         majors_and_stables = ['BTCUSDT', 'ETHUSDT', 'USDTUSDT', 'USDCUSDT', 'DAIUSDT', 'FDUSDUSDT', 'STETHUSDT', 'WETHUSDT', 'WBTCUSDT']
         processed_df = processed_df[~processed_df['심볼'].isin(majors_and_stables)]
         processed_df = processed_df[~processed_df['이름'].str.contains('USD|Wrapped|Tether', case=False)]
 
-    # [필터링 2] 최소 거래대금 적용
     processed_df = processed_df[processed_df['24h 거래대금(백만$)'] >= min_volume_million]
-    
-    # 정렬 및 상위 30개 종목 확정
     df_sorted = processed_df.sort_values(by=sort_by, ascending=ascending).head(30).reset_index(drop=True)
     
     st.subheader(f"🔥 조건 만족 주도 자산 TOP {len(df_sorted)} ({sort_by} 높은 순)")
@@ -88,7 +89,6 @@ if not df.empty:
         col1, col2 = st.columns([12, 10])
         
         with col1:
-            # 화면 표시용 데이터프레임에서는 차트 원본 배열 데이터를 가려줍니다.
             display_df = df_sorted.drop(columns=['sparkline'])
             
             event = st.dataframe(
@@ -104,10 +104,10 @@ if not df.empty:
             )
             
         with col2:
-            # 테이블 클릭 감지 (기본값은 리스트 1위 종목)
             selected_row_index = 0
             if event and event.get("selection", {}).get("rows"):
                 selected_row_index = event["selection"]["rows"][0]
+                # 사용자가 무언가를 클릭했다면 타이머 일시 정지 효과를 위해 세션 상태 저장 가능 (여기선 생략)
             
             selected_row = df_sorted.iloc[selected_row_index]
             target_symbol = selected_row['심볼']
@@ -115,42 +115,40 @@ if not df.empty:
             
             st.markdown(f"### 📈 {target_symbol} 실시간 트렌드 (최근 7일)")
             
-            # 코인게코 선 차트 렌더링
             if sparkline_prices and len(sparkline_prices) > 1:
                 fig = go.Figure()
-                
-                # 상승/하락 여부에 따른 차트 테마 설정 (초록/빨강)
                 is_positive = sparkline_prices[-1] >= sparkline_prices[0]
                 line_color = '#10B981' if is_positive else '#EF4444'
                 fill_color = 'rgba(16, 185, 129, 0.08)' if is_positive else 'rgba(239, 68, 68, 0.08)'
                 
                 fig.add_trace(go.Scatter(
-                    y=sparkline_prices, 
-                    mode='lines',
+                    y=sparkline_prices, mode='lines',
                     line=dict(color=line_color, width=3),
-                    fill='tozeroy', 
-                    fillcolor=fill_color,
-                    name="Price"
+                    fill='tozeroy', fillcolor=fill_color, name="Price"
                 ))
                 
                 fig.update_layout(
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                     yaxis=dict(showgrid=True, zeroline=False, showticklabels=True, gridcolor='rgba(128,128,128,0.15)'),
-                    margin=dict(l=25, r=25, t=10, b=10), 
-                    height=380,
-                    paper_bgcolor='rgba(0,0,0,0)', 
-                    plot_bgcolor='rgba(0,0,0,0)'
+                    margin=dict(l=25, r=25, t=10, b=10), height=380,
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("⚠️ 차트 데이터를 불러올 수 없습니다.")
                 
-            # 하단 현재 스탯 메트릭 노출
             st.metric(
                 label=f"{selected_row['이름']} 현재 가격", 
                 value=f"${selected_row['현재가($)']:,.4f}", 
                 delta=f"{selected_row['24h 변동률(%)']:+.2f}%"
             )
+
+        # ⏳ [핵심 추가] 사이드바 설정에 따른 새로고침 타이머 로직
+        if refresh_rate != "끄기":
+            sec = 30 if refresh_rate == "30초" else (60 if refresh_rate == "1분" else 120)
+            time.sleep(sec)
+            st.rerun()  # 지정된 초가 지나면 자동으로 스크립트를 재실행(새로고침)합니다.
+            
     else:
         st.warning("⚠️ 필터 조건을 만족하는 자산이 없습니다. '최소 거래대금' 슬라이더를 낮춰보세요.")
 else:
