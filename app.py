@@ -1,52 +1,56 @@
 import streamlit as st
 import pandas as pd
-import requests
+import ccxt
 import plotly.graph_objects as go
+from datetime import datetime
 
-# 페이지 레이아웃 설정
-st.set_page_config(layout="wide", page_title="Binance Crypto Dashboard")
-st.title("📊 바이낸스 실시간 시장 대시보드")
+st.set_page_config(layout="wide", page_title="Binance Global Realtime Dashboard")
+st.title("📊 바이낸스 본진(Global) 실시간 시장 대시보드")
 
-@st.cache_data(ttl=15)
-def get_binance_ticker():
-    # [우회핵심 1] 클라우드 서버 차단이 덜한 미국 전용 도메인(binance.us)으로 타겟 변경
-    url = "https://api.binance.us/api/v3/ticker/24hr"
-    
-    # [우회핵심 2] 파이썬 봇이 아니라 일반 크롬 브라우저 유저인 것처럼 헤더(User-Agent) 위장
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# CCXT 바이낸스 객체 생성 (전 세계 공통 binance.com 본진 데이터)
+exchange = ccxt.binance({
+    'enableRateLimit': True,
+    'options': {
+        'defaultType': 'spot' # 스팟(현물) 마켓 기준
     }
+})
+
+@st.cache_data(ttl=10) # 10초 캐싱
+def get_global_binance_ticker():
+    # CCXT를 통해 바이낸스 본진의 모든 티커를 한 번에 호출 (차단 우회 최적화 내장)
+    tickers = exchange.fetch_tickers()
     
-    response = requests.get(url, headers=headers).json()
-    
-    # USDT 마켓만 필터링
-    usdt_data = [ticker for ticker in response if ticker['symbol'].endswith('USDT')]
-    
+    usdt_data = []
+    for symbol, ticker in tickers.items():
+        # USDT 마켓만 필터링 (예: BTC/USDT)
+        if symbol.endswith('/USDT'):
+            # 레버리지 토큰(UP/DOWN) 제외하여 노이즈 제거
+            if 'UP/' in symbol or 'DOWN/' in symbol:
+                continue
+                
+            usdt_data.append({
+                '심볼': symbol.replace('/', ''), # 대시보드 표시용 (BTCUSDT)
+                '현재가': ticker['last'],
+                '24h 변동률(%)': ticker['percentage'], # 글로벌 본진 변동률
+                '거래량': ticker['baseVolume'],
+                '거래대금(USDT)': ticker['quoteVolume'] # 글로벌 본진 거래대금
+            })
+            
     df = pd.DataFrame(usdt_data)
-    df = df[['symbol', 'lastPrice', 'priceChangePercent', 'volume', 'quoteVolume']]
-    df.columns = ['심볼', '현재가', '24h 변동률(%)', '거래량', '거래대금(USDT)']
-    
-    df['현재가'] = pd.to_numeric(df['현재가'])
-    df['24h 변동률(%)'] = pd.to_numeric(df['24h 변동률(%)'])
-    df['거래량'] = pd.to_numeric(df['거래량'])
-    df['거래대금(USDT)'] = pd.to_numeric(df['거래대금(USDT)'])
-    
     return df
 
-def get_klines(symbol, interval='1h', limit=24):
-    url = f"https://api.binance.us/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    res = requests.get(url, headers=headers).json()
-    closes = [float(candle[4]) for candle in res]
+def get_global_klines(symbol_display, interval='1h', limit=24):
+    # 디스플레이용 심볼을 CCXT용 심볼(BTC/USDT)로 역변환
+    ccxt_symbol = f"{symbol_display[:-4]}/{symbol_display[-4:]}"
+    # 캔들 데이터 수집
+    ohlcv = exchange.fetch_ohlcv(ccxt_symbol, timeframe=interval, limit=limit)
+    closes = [candle[4] for candle in ohlcv] # 종가만 추출
     return closes
 
-# 데이터 로딩 시도 및 예외처리 메시지 상세화
 try:
-    df = get_binance_ticker()
+    df = get_global_binance_ticker()
 except Exception as e:
-    st.error(f"데이터를 가져오는 중 오류가 발생했습니다. (원인: {e})")
+    st.error(f"글로벌 바이낸스 데이터를 가져오는 데 실패했습니다. (원인: {e})")
     df = pd.DataFrame()
 
 # 사이드바 설정
@@ -57,7 +61,7 @@ ascending = True if order == "오름차순 (낮은 순)" else False
 
 if not df.empty:
     df_sorted = df.sort_values(by=sort_by, ascending=ascending).head(10).reset_index(drop=True)
-    st.subheader(f"🔥 {sort_by} {order} 상위 10개 자산")
+    st.subheader(f"🔥 글로벌 본진 {sort_by} {order} 상위 10개 자산")
     
     col1, col2 = st.columns([3, 2])
     with col1:
@@ -77,7 +81,7 @@ if not df.empty:
         
         if selected_symbol:
             try:
-                prices = get_klines(selected_symbol)
+                prices = get_global_klines(selected_symbol)
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     y=prices, mode='lines', 
@@ -92,7 +96,7 @@ if not df.empty:
                     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
                 )
                 st.plotly_chart(fig, use_container_width=True)
-            except:
-                st.warning("차트 데이터를 불러오지 못했습니다.")
+            except Exception as e:
+                st.warning(f"차트 데이터를 불러오지 못했습니다. ({e})")
 else:
     st.info("표시할 데이터가 없습니다.")
