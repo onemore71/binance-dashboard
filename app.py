@@ -1,40 +1,26 @@
 import streamlit as st
 import pandas as pd
-import ccxt
+import requests
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide", page_title="Binance Global Realtime Dashboard")
 st.title("📊 바이낸스 본진(Global) 실시간 시장 대시보드")
 
-# [우회 조치] 클라우드 지역 제한(451 에러)을 우회하기 위한 프록시/예비 도메인 설정
-exchange = ccxt.binance({
-    'enableRateLimit': True,
-    'urls': {
-        'api': {
-            'public': 'https://api1.binance.com/api/v3', # 메인 대신 api1 예비 도메인 명시
-        },
-    },
-    'options': {
-        'defaultType': 'spot',
-        'adjustForTimeDifference': True # 클라우드 서버와 바이낸스 간 시간 차이 보정
-    },
-    # 일반 브라우저처럼 보이기 위한 헤더 강제 주입
-    'headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-})
-
-@st.cache_data(ttl=15) # 15초 데이터 유지
+@st.cache_data(ttl=15)
 def get_global_binance_ticker():
-    # fetch_tickers 대신 지역 제한 체크를 덜 타는 24hr 전체 티커 API 직접 매핑 방식 사용
-    tickers = exchange.public_get_ticker_24hr()
+    # [국가 제한 우회 핵심] 미국 IP를 차단하지 않는 글로벌 바이낸스 공용 데이터 미러 서버(공식 우회 채널) 활용
+    url = "https://data-api.binance.vision/api/v3/ticker/24hr"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    response = requests.get(url, headers=headers).json()
     
     usdt_data = []
-    for ticker in tickers:
+    for ticker in response:
         symbol = ticker['symbol']
-        # USDT 마켓만 필터링
         if symbol.endswith('USDT'):
-            # 레버리지/이상 토큰 필터링
             if 'UP' in symbol or 'DOWN' in symbol or 'BEAR' in symbol or 'BULL' in symbol:
                 continue
                 
@@ -50,17 +36,19 @@ def get_global_binance_ticker():
     return df
 
 def get_global_klines(symbol, interval='1h', limit=24):
-    # 차트용 캔들 조회도 예비 도메인으로 우회 호출
-    params = {'symbol': symbol, 'interval': interval, 'limit': limit}
-    ohlcv = exchange.public_get_klines(params)
-    closes = [float(candle[4]) for candle in ohlcv] # 종가 추출
+    # 차트 데이터도 국가 제한이 없는 미러 서버 채널로 호출
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    res = requests.get(url, headers=headers).json()
+    closes = [float(candle[4]) for candle in res]
     return closes
 
 try:
     df = get_global_binance_ticker()
 except Exception as e:
-    st.error(f"글로벌 바이낸스 데이터를 가져오는 데 실패했습니다.\n\n원인: {e}")
-    st.info("💡 만약 서버 국가 차단이 지속될 경우, 잠시 후 대시보드 우측 하단의 [Reboot]을 실행해 주세요.")
+    st.error(f"데이터 로드 실패: {e}")
     df = pd.DataFrame()
 
 # 사이드바 설정
