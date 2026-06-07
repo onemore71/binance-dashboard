@@ -8,8 +8,8 @@ st.title("🔥 바이낸스 USDT 무기한 선물(Perpetual) 대시보드")
 
 @st.cache_data(ttl=15)
 def get_binance_futures_ticker():
-    # [선물 마켓 핵심 주소] 무기한 선물용 fapi 도메인 및 24hr ticker 엔드포인트 사용
-    url = "https://fapi.binance.vision/fapi/v1/ticker/24hr"
+    # [수정] 실거래 메인넷 도메인(fapi.binance.com)으로 변경
+    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -41,8 +41,8 @@ def get_binance_futures_ticker():
     return df
 
 def get_binance_futures_klines(symbol, interval='1h', limit=24):
-    # 차트 데이터도 선물 전용 캔들(fapi) 엔드포인트로 호출
-    url = f"https://fapi.binance.vision/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    # [수정] 실거래 메인넷 도메인(fapi.binance.com)으로 변경
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
