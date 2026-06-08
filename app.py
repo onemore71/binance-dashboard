@@ -14,7 +14,7 @@ def get_coingecko_market_data():
     params = {
         "vs_currency": "usd",
         "order": "market_cap_desc",
-        "per_page": 250, 
+        "per_page": 1000, 
         "page": 1,
         "sparkline": "true",
         "price_change_percentage": "24h"
